@@ -1,6 +1,6 @@
 # STM32F407 Bootloader
 
-基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 用于观察跳转后的运行状态，并通过 CAN 向配套 F103 工程发送更新命令。F103 包含串口接收、内部 Flash 写入和 CAN 命令判断代码；当前主函数的接收及更新初始化入口被注释，状态见下文。
+基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 通过串口 `cmd` 触发 CAN 更新命令，并在接收结束后打印累计字节数。配套 F103 当前使用内部 Flash 中已有的 4480 字节 BIN，收到 `hyf` 后分帧发送；串口接收和内部 Flash 写入功能仍保留，当前未接入启动流程。
 
 初始三工程源码基线：[430dadb](https://github.com/Mangta517/bootloader/commit/430dadbbfdbfa0a3d6f865c4147dae49b106cc4c)（2026-10-27）。后续改动、验证结果和剩余问题见[更新记录](#更新记录)。
 
@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | [`stm32f407vet6`](stm32f407vet6) | 主 Bootloader：读取 EEPROM 状态、等待 KEY1 请求、执行 W25Q16 更新并选择跳转目标 | [`stm32f407vet6.uvprojx`](stm32f407vet6/MDK-ARM/stm32f407vet6.uvprojx) |
 | [`stm32f407vet6reset`](stm32f407vet6reset) | 独立恢复程序：USART1 接收 BIN、写入 APP 区并跳转 | [`stm32f407vet6reset.uvprojx`](stm32f407vet6reset/MDK-ARM/stm32f407vet6reset.uvprojx) |
-| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：LED 交替点亮，每秒通过 CAN 发送 ID 0 的 `hyf` 命令 | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
-| [`STM32F103CAN`](STM32F103CAN) | 配套接收端：串口接收 BIN、写内部 Flash、校验完成后等待 CAN 更新命令 | [`STM32F103CAN.uvprojx`](STM32F103CAN/MDK-ARM/STM32F103CAN.uvprojx) |
+| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：空闲闪灯；串口 `cmd` 触发一次 `hyf`，随后累计 CAN 接收长度 | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
+| [`STM32F103CAN`](STM32F103CAN) | 配套发送端：收到 `hyf` 后，将 Flash 中已有的 BIN 以标准 ID 1 分帧发送 | [`STM32F103CAN.uvprojx`](STM32F103CAN/MDK-ARM/STM32F103CAN.uvprojx) |
 
 四个目录保留各自的 `Core`、`Drivers`、CubeMX `.ioc` 和 Keil 配置；主引导、恢复和配套 CAN 工程还包含 `application`、`interface` 和主机测试。仓库不纳入旁边的 CMake 工程、历史备份、动画实验、编译产物和本机调试设置。厂商依赖保留原有许可证文件。
 
@@ -54,7 +54,7 @@ flowchart TD
 | KEY1 | PE0 / EXTI0，触发主引导的恢复请求 |
 | LED0 / LED1 | PE5 / PE6，低电平点亮 |
 
-USB 转串口使用 3.3 V TTL 电平，TX 接板卡 RX，RX 接板卡 TX，并共地。恢复程序当前由 `main.c` 将 PE6 拉低常亮；LED APP 则交替点亮 PE5、PE6。主工程不包含 CAN 通信功能。
+USB 转串口使用 3.3 V TTL 电平，TX 接板卡 RX，RX 接板卡 TX，并共地。恢复程序当前由 `main.c` 将 PE6 拉低常亮；LED APP 在空闲状态交替点亮 PE5、PE6。主工程不包含 CAN 通信功能。
 
 ## EEPROM 状态与 W25Q16 更新
 
@@ -98,13 +98,17 @@ W25Q16 `0x000000–0x000007` 存放两项 32 位小端元数据，定义见 [`ap
 ## F103 串口接收与 CAN 配套
 
 F103C8 的程序区域为 `0x08000000～0x08007FFF`，串口接收数据区为 `0x08008000～0x0800FFFF`，最大 BIN 为 32768 字节。
-**当前工作状态：F103 `Core/Src/main.c` 中的 `App_bootloader_init()`、接收 while 循环和 `app_update_init()` 均被注释；本次原样发布，不自动恢复入口。启动顺序主机回归因此失败，相关流程尚未启用。**
+当前 F103 启动直接设置已有 BIN 的长度为 4480 字节、状态为 `APP_FLASH_DONE`，随后调用 `app_update_init()` 等待 CAN 命令；复位不擦除 BIN 数据区，也不等待重新通过串口接收。长度由 `APP_UPDATE_STORED_SIZE_BYTES` 定义，不自动探测 Flash 内容，不会跟随 F407 APP 构建产物变化。
 
-按已实现的流程，F103 应先在独立循环中调用 `App_bootloader_update()`：沿用 `start:十进制长度` 命令、原打印和错误复位流程，提前按页擦除数据区，然后启动 USART1 循环 DMA 接收。
-空闲 2 秒后比较实际长度与声明长度，处理奇数尾字节；只有成功才退出接收循环并初始化 CAN 更新判断，不执行 APP 跳转。
+需要装载新 BIN 时，先按 F103 操作说明恢复 `App_bootloader_init()` 和独立接收循环：发送 `start:十进制长度`，等待擦除完成后发送 BIN；串口接收、Flash 写入和空闲 2 秒收尾成功后，再初始化 CAN 更新判断。更换已存 BIN 后须同步固定长度宏。
 
-CAN 双方均为 200 kbit/s：F407 PB8/RX、PB9/TX；F103 PA11/RX、PA12/TX，均经 CAN 收发器接入总线。
-F407 每秒发送标准 ID 0、DLC 3 的 `hyf`；F103 校验后进入发送状态。**F103 的发送函数当前仍为空，尚未实现经 CAN 发送 BIN。**
+CAN 双方均为 200 kbit/s：F407 PB8/RX、PB9/TX；F103 PA11/RX、PA12/TX，均经 CAN 收发器接入总线、共地，并在总线两端各接一个 120 Ω 终端。
+
+F407 在 USART1 收到 `cmd` 后发送一次标准 ID 0、DLC 3 的 `hyf`，随后进入接收状态。F103 严格校验命令和 Flash 状态后，以标准 ID 1 发送有效 BIN，单帧最多 8 字节，尾帧只发送剩余字节；每帧发送成功后等待 10 ms，发送完成后停留 DONE，失败或超时则进入 ERROR 并停止。
+
+F407 只累计标准 ID 1、DLC 为 1～8 的数据帧，接收期间不逐帧打印。连续 1 秒无有效数据后输出一次 `CAN receive done,len:实际接收字节数`，再回到空闲；完全没有收到数据也会报告 0。开始下一轮前复位 F103，再向空闲的 F407 发送 `cmd`。
+
+当前 CAN 路径只做接收长度统计，不进行数据内容校验、W25Q16 保存或 EEPROM 更新。CAN 接收中断和 1 KiB 数据缓冲尚未实现，相关容量与连续擦写时序讨论不属于当前代码功能。
 
 - [F103 串口操作、Flash 分区与验证](STM32F103CAN/FLASH_RECEIVE.md)
 - [F103 CAN 状态机与功能接口](STM32F103CAN/CAN_README.md)
@@ -120,13 +124,14 @@ LED APP 的 After Build 命令目前保留本机 `D:\32 51\51\ARM\ARMCC\bin\from
 & '你的Keil安装目录\ARM\ARMCC\bin\fromelf.exe' --bin --output='.\stm32f407vet6led\stm32f407vet6led.bin' '.\stm32f407vet6led\stm32f407vet6led.axf'
 ```
 
-使用 SWD / J-Link 首次分别部署三个程序：
+使用 SWD 调试器将三个 F407 程序分别部署到 F407，将配套 F103 程序部署到 F103：
 
 | 工程 | 重建输出位置（相对仓库根目录） | BIN 写入地址 |
 | --- | --- | --- |
 | 主引导 | `stm32f407vet6/MDK-ARM/stm32f407vet6/` | `0x08000000` |
 | 恢复程序 | `stm32f407vet6reset/MDK-ARM/stm32f407vet6reset/` | `0x08004000` |
 | LED APP | `stm32f407vet6led/MDK-ARM/stm32f407vet6led/` | `0x08008000` |
+| F103 CAN 程序（独立目标板） | `STM32F103CAN/MDK-ARM/STM32F103CAN/` | `0x08000000` |
 
 HEX / AXF 自带地址信息，裸 BIN 需要指定上表地址。连续部署时使用目标扇区擦除，避免后一次整片擦除删除先前写入的主引导或恢复程序。仓库不包含预编译 BIN / HEX，使用本次构建产物。
 
@@ -143,6 +148,10 @@ python -B .\stm32f407vet6\tools\test_bootloader_jump.py
 python -B .\stm32f407vet6reset\tools\test_eeprom.py
 python -B .\stm32f407vet6reset\tools\test_w25q16.py
 python -B .\stm32f407vet6reset\tools\test_uart_ring.py
+python -B .\stm32f407vet6led\tools\test_can_receive.py
+python -B .\STM32F103CAN\tools\test_uart_receive.py
+python -B .\STM32F103CAN\tools\test_app_flash.py
+python -B .\STM32F103CAN\tools\test_app_update.py
 ```
 
 这些测试以模拟 HAL 和内存运行实际 C 代码；部分用例使用 Windows 内存映射接口，不能假设在 Linux / macOS 上直接可运行。
@@ -173,8 +182,18 @@ python -B .\stm32f407vet6reset\tools\test_uart_ring.py
 - 主引导跳转失败后停留空主循环；持久 `BOOT_RESET` 状态不会由恢复程序自动清除，后续复位仍会进入恢复流程。
 - W25Q16 更新和串口恢复直接擦写同一 APP 区，没有 A/B APP 回滚；恢复区需要事先正确部署。
 - LED APP 的 BIN 生成命令包含本机工具路径，换机需要调整；实际硬件接线与本页一致性仍需自行核对。
+- CAN 接收目前只累计字节数，长度一致不能证明内容、顺序或重复帧正确；没有结束帧，连续 1 秒无有效数据会结束本轮。尚未实现 CAN 接收中断、1 KiB 数据缓冲、W25Q16 保存和 EEPROM 更新。
+- F103 当前使用固定 4480 字节的已有 BIN 联调入口，新板或已擦除数据区不能直接套用；需先装载有效 BIN 并同步长度。F103 发送完成或失败后，开始下一轮前需要复位。
 
 ## 更新记录
+
+### 2026-11-01 · [957ea1f](https://github.com/Mangta517/bootloader/commit/957ea1fbb9615138a5fd2659dd68efa763e85647) · F103 BIN 分帧发送与 F407 接收长度测试
+
+- **问题**：原发布版本的 F103 发送函数为空、启动入口未启用；F407 周期发送 `hyf`，无法按串口命令开始一轮完整接收长度测试。逐帧阻塞串口打印也会影响接收节拍。
+- **改动**：F103 使用 Flash 中已有的 4480 字节 BIN 启动联调，严格校验命令后以 ID 1 分帧发送，每帧后等待 10 ms；CAN 发送检查 TXOK，失败或 100 ms 超时后停止。F407 改为 USART1 IDLE 中断识别 `cmd`、单次发送 `hyf`、主循环累计有效接收字节，空闲 1 秒后打印长度并返回空闲。同步 HAL 依赖、CubeMX/Keil 配置、主机测试、配套操作说明和历史逐帧联调统计 JSON。
+- **优化作用**：接收期间取消逐帧阻塞打印，减少打印对接收测试的影响；明确区分发送完成、接收字节数以及实际固件保存。每轮 F407 统计在发送命令前清零，便于重复测试。
+- **验证结果**：针对本功能提交的代码，10 套主机回归全部通过；主 Bootloader、串口恢复、F407 APP、F103 四个 Keil 工程全量重建均为 0 错误、0 警告。当前长度统计版本的用户回传 F407 实板串口日志显示 `CAN receive done,len:4480`，与联调 BIN 长度一致；这是长度反馈，未做内容校验。历史 JSON 的逐字节匹配结果属于此前逐帧打印版本。本次 Git 发布操作未烧录或执行新的实板测试。
+- **剩余问题**：当前 F407 没有接收中断、1 KiB 数据缓冲、CAN 固件内容校验、W25Q16 保存和 EEPROM 标志提交。F103 固定长度须与已有 BIN 一致，开始下一轮前需要复位。F407 命令发送沿用原邮箱等待和返回结果处理；原有主引导、恢复程序及掉电限制保留。
 
 ### 2026-10-31 · [68a7f9d](https://github.com/Mangta517/bootloader/commit/68a7f9d76124c630d224de5bbaf29fb7fd494a31) · F103 串口接收与 F407 CAN 配套
 
