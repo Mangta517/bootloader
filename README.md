@@ -1,8 +1,8 @@
 # STM32F407 Bootloader
 
-基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 用于观察跳转后的运行状态。
+基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 用于观察跳转后的运行状态，并通过 CAN 向配套 F103 工程发送更新命令。F103 包含串口接收、内部 Flash 写入和 CAN 命令判断代码；当前主函数的接收及更新初始化入口被注释，状态见下文。
 
-当前源码基线：[430dadb](https://github.com/Mangta517/bootloader/commit/430dadbbfdbfa0a3d6f865c4147dae49b106cc4c)（2026-10-27）。本次首次建立仓库，保留三个本地工程的现有固件行为；改动位置、作用、验证结果和剩余问题见[更新记录](#更新记录)。
+初始三工程源码基线：[430dadb](https://github.com/Mangta517/bootloader/commit/430dadbbfdbfa0a3d6f865c4147dae49b106cc4c)（2026-10-27）。后续改动、验证结果和剩余问题见[更新记录](#更新记录)。
 
 ## 工程组成
 
@@ -10,9 +10,10 @@
 | --- | --- | --- |
 | [`stm32f407vet6`](stm32f407vet6) | 主 Bootloader：读取 EEPROM 状态、等待 KEY1 请求、执行 W25Q16 更新并选择跳转目标 | [`stm32f407vet6.uvprojx`](stm32f407vet6/MDK-ARM/stm32f407vet6.uvprojx) |
 | [`stm32f407vet6reset`](stm32f407vet6reset) | 独立恢复程序：USART1 接收 BIN、写入 APP 区并跳转 | [`stm32f407vet6reset.uvprojx`](stm32f407vet6reset/MDK-ARM/stm32f407vet6reset.uvprojx) |
-| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：PE5、PE6 两个低电平有效 LED 每 500 ms 交替点亮 | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
+| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：LED 交替点亮，每秒通过 CAN 发送 ID 0 的 `hyf` 命令 | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
+| [`STM32F103CAN`](STM32F103CAN) | 配套接收端：串口接收 BIN、写内部 Flash、校验完成后等待 CAN 更新命令 | [`STM32F103CAN.uvprojx`](STM32F103CAN/MDK-ARM/STM32F103CAN.uvprojx) |
 
-三个目录保留各自的 `Core`、`Drivers`、CubeMX `.ioc` 和 Keil 配置；主引导与恢复工程还包含 `application`、`interface` 和主机测试。仓库不纳入旁边的 CMake 工程、历史备份、动画实验、编译产物和本机调试设置。厂商依赖保留原有许可证文件。
+四个目录保留各自的 `Core`、`Drivers`、CubeMX `.ioc` 和 Keil 配置；主引导、恢复和配套 CAN 工程还包含 `application`、`interface` 和主机测试。仓库不纳入旁边的 CMake 工程、历史备份、动画实验、编译产物和本机调试设置。厂商依赖保留原有许可证文件。
 
 ## Flash 分区与启动流程
 
@@ -43,7 +44,7 @@ flowchart TD
 
 ## 硬件连接
 
-三个工程均采用 HSE 8 MHz、系统时钟 168 MHz 的配置。
+三个 F407 工程均采用 HSE 8 MHz、系统时钟 168 MHz；F103 使用 HSE 8 MHz、系统时钟 72 MHz。
 
 | 功能 | 引脚 / 参数 |
 | --- | --- |
@@ -94,9 +95,24 @@ W25Q16 `0x000000–0x000007` 存放两项 32 位小端元数据，定义见 [`ap
 
 接收与收尾说明见 [`SERIAL_UPGRADE.md`](stm32f407vet6reset/SERIAL_UPGRADE.md)，实现位于 [`app_reset.c`](stm32f407vet6reset/application/app_reset.c) 和 [`int_bootloader.c`](stm32f407vet6reset/interface/int_bootloader.c)。
 
+## F103 串口接收与 CAN 配套
+
+F103C8 的程序区域为 `0x08000000～0x08007FFF`，串口接收数据区为 `0x08008000～0x0800FFFF`，最大 BIN 为 32768 字节。
+**当前工作状态：F103 `Core/Src/main.c` 中的 `App_bootloader_init()`、接收 while 循环和 `app_update_init()` 均被注释；本次原样发布，不自动恢复入口。启动顺序主机回归因此失败，相关流程尚未启用。**
+
+按已实现的流程，F103 应先在独立循环中调用 `App_bootloader_update()`：沿用 `start:十进制长度` 命令、原打印和错误复位流程，提前按页擦除数据区，然后启动 USART1 循环 DMA 接收。
+空闲 2 秒后比较实际长度与声明长度，处理奇数尾字节；只有成功才退出接收循环并初始化 CAN 更新判断，不执行 APP 跳转。
+
+CAN 双方均为 200 kbit/s：F407 PB8/RX、PB9/TX；F103 PA11/RX、PA12/TX，均经 CAN 收发器接入总线。
+F407 每秒发送标准 ID 0、DLC 3 的 `hyf`；F103 校验后进入发送状态。**F103 的发送函数当前仍为空，尚未实现经 CAN 发送 BIN。**
+
+- [F103 串口操作、Flash 分区与验证](STM32F103CAN/FLASH_RECEIVE.md)
+- [F103 CAN 状态机与功能接口](STM32F103CAN/CAN_README.md)
+- [F407 CAN 命令与接线](stm32f407vet6led/CAN_RECEIVE.md)
+
 ## 构建与部署
 
-使用 Keil µVision 5、ARM Compiler 5.06 update 5（build 528）及 STM32F4xx 设备支持包，分别打开上表三个 `.uvprojx` 并全量重建。工程内的源文件和头文件目录使用相对路径，保留目录结构即可解析。
+使用 Keil µVision 5、ARM Compiler 5.06 update 5（build 528）及 STM32F4xx 设备支持包，分别打开对应的 `.uvprojx` 并全量重建。工程内的源文件和头文件目录使用相对路径，保留目录结构即可解析。
 
 LED APP 的 After Build 命令目前保留本机 `D:\32 51\51\ARM\ARMCC\bin\fromelf.exe` 绝对路径；换机器时应在 Keil 的 Options for Target → User 中调整该路径，或关闭该命令后手动生成 BIN。在 LED 工程的 `MDK-ARM` 目录执行：
 

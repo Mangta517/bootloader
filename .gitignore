@@ -1,10 +1,11 @@
-# Only publish the three related Keil projects from this directory.
+# Only publish the related Bootloader and CAN Keil projects from this directory.
 /*
 !/.gitignore
 !/README.md
 !/stm32f407vet6/
 !/stm32f407vet6reset/
 !/stm32f407vet6led/
+!/STM32F103CAN/
 
 # Historical copies and local editor state.
 backups/
@@ -16,6 +17,8 @@ __pycache__/
 *.Bak
 *.orig
 *.tmp
+*.lock
+*.dep
 *.uvguix.*
 *.uvoptx
 .mxproject
@@ -24,6 +27,7 @@ __pycache__/
 **/MDK-ARM/stm32f407vet6/
 **/MDK-ARM/stm32f407vet6reset/
 **/MDK-ARM/stm32f407vet6led/
+**/MDK-ARM/STM32F103CAN/
 **/MDK-ARM/DebugConfig/
 **/MDK-ARM/RTE/
 *.o
@@ -42,6 +46,7 @@ __pycache__/
 JLinkLog.txt
 JLinkSettings.ini
 _jlinklog_decoded.txt
+outputs/
 
 # Unrelated local animation experiments.
 chirality-animation.html
