@@ -25,7 +25,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "int_can.h"
-#include "app_can.h"
+#include "app_update.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,8 +41,6 @@
 #define LED1_ON()   HAL_GPIO_WritePin(led1_GPIO_Port, led1_Pin, GPIO_PIN_RESET)
 #define LED1_OFF()  HAL_GPIO_WritePin(led1_GPIO_Port, led1_Pin, GPIO_PIN_SET)
 
-/* 每只 LED 点亮时长(ms)，两灯交替轮流的周期 */
-#define LED_BLINK_INTERVAL_MS  500
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -76,9 +74,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-    uint32_t last_led_tick;
-    uint32_t now_ms;
-    uint8_t startup_message[] = "CAN1 TX hyf 200000 bit/s\r\n";
+    uint8_t startup_message[] = "CAN1 ready 200000 bit/s\r\n";
 
   __disable_irq();
   //重定向中断向量表
@@ -112,7 +108,7 @@ int main(void)
     HAL_UART_Transmit(&huart1, startup_message, sizeof(startup_message) - 1, 100);
     LED0_ON();
     LED1_OFF();
-    last_led_tick = HAL_GetTick();
+    app_update_init();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -122,16 +118,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    app_can_process();
-
-    /* 按节拍切换 LED，持续处理 CAN 发送，避免 500 ms 延时占住发送节拍。 */
-    now_ms = HAL_GetTick();
-    if ((uint32_t)(now_ms - last_led_tick) >= LED_BLINK_INTERVAL_MS)
-    {
-        last_led_tick = now_ms;
-        HAL_GPIO_TogglePin(led0_GPIO_Port, led0_Pin);
-        HAL_GPIO_TogglePin(led1_GPIO_Port, led1_Pin);
-    }
+    app_update_work();
   }
   /* USER CODE END 3 */
 }

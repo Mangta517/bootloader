@@ -93,12 +93,10 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
-//    App_bootloader_init();
-//    while (app_flash_state != APP_FLASH_DONE)
-//    {
-//        App_bootloader_update();
-//    }
-//    app_update_init();
+    /* 使用 Flash 中已有的 BIN，复位后直接等待 CAN 命令，不重新接收或擦除数据。 */
+    app_size_bytes = APP_UPDATE_STORED_SIZE_BYTES;
+    app_flash_state = APP_FLASH_DONE;
+    app_update_init();
 
   /* USER CODE END 2 */
 

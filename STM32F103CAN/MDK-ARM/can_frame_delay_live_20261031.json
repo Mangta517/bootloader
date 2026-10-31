@@ -1,0 +1,8 @@
+{
+  "frames": 560,
+  "bytes": 4480,
+  "expected_frames": 560,
+  "expected_bytes": 4480,
+  "byte_exact_match": true,
+  "f103_uart": "hyf OK, enter send update\r\nCAN send done,len:4480\r\n"
+}

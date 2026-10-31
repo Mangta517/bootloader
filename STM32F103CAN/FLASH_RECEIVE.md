@@ -1,6 +1,6 @@
 # F103 串口接收并写入内部 Flash
 
-> 当前源码状态：`Core/Src/main.c` 的接收循环和 `app_update_init()` 入口已注释，以下为这些函数启用后的流程说明；启动顺序回归当前失败。
+`Core/Src/main.c` 当前直接发送 Flash 中已有的 4480 字节 BIN，串口接收循环暂未接入启动流程。下面说明保留的串口接收功能；重新装载 BIN 前，需按 `CAN_README.md` 恢复接收入口。
 
 ## 分区
 
@@ -20,7 +20,7 @@ USART1：PA9/TX、PA10/RX，3.3 V TTL，共地，115200、8N1。
 4. 接收期间按最多 512 字节连续追加写入，跨块的奇数字节先保留。
 5. 接收层确认空闲并取完尾部后等待 2 秒；新字节到达会重新计时。
 6. 比较实际 BIN 长度与 `start:` 声明长度，匹配后补写最后一个奇数字节（高字节填 FF）、停止 DMA 接收，打印 `ok,len:长度`。
-7. 只有上述流程成功后，更新状态机才开始判断 CAN 的 `hyf` 更新命令。CAN 发送函数暂保持为空。
+7. 只有上述流程成功后，更新状态机才开始判断 CAN 的 `hyf` 更新命令。收到合法命令后，以标准 ID `1` 将有效 BIN 按每帧最多 8 字节发出，尾部 FF 填充不发送；发送格式和完成/失败行为见 `CAN_README.md`。
 
 Flash 使用 F103 的 1 KiB 页擦除和 16 位半字写入。有效长度不包含命令及最后的 FF 填充。
 串口/DMA 错误、缓冲溢出、超出声明长度、2 秒后长度不符或 Flash 操作失败，均沿用原程序的错误打印及复位流程，不进入 CAN 更新判断。
@@ -33,13 +33,13 @@ Flash 使用 F103 的 1 KiB 页擦除和 16 位半字写入。有效长度不包
 - `app_size_bytes`：已接受的 BIN 字节数，DONE 时为有效写入长度；接收中的最后一个奇数字节可能仍在 RAM。
 - `uart1_rx_full_len`：DMA 接收的 BIN 总字节数，不包含命令。
 
-`App_bootloader_init()` 在主函数初始化阶段调用；随后独立 while 循环持续调用 `App_bootloader_update()`，只在接收和校验成功后退出。退出后才调用 `app_update_init()`，进入 CAN 更新判断。
+恢复串口接收入口时，先调用 `App_bootloader_init()`，再在独立 while 循环中持续调用 `App_bootloader_update()`，接收完成后才调用 `app_update_init()`。当前联调入口直接使用已有 BIN，不执行上述接收循环。
 原 `interface/int_uart.c` 的循环 DMA 接收处理逻辑未改动。USART1 的 `fputc()` 负责协议反馈与现有 printf 日志。
 
 ## 验证
 
 - `python tools/test_app_flash.py`：实际 DMA 接收代码与应用层联合模拟，含命令解析、预擦除、2 秒收尾、长度不符、奇数尾部、32 KiB 边界及错误路径。
-- `python tools/test_app_update.py`：检查接收完成前不判断 CAN 命令，以及原 `hyf` 命令校验。
+- `python tools/test_app_update.py`：检查已有 BIN 的直接 CAN 启动流程、`hyf` 命令校验和发送行为。
 - Keil 工程：`MDK-ARM/STM32F103CAN.uvprojx`。
 
 主机测试和固件构建不代替板上串口与 Flash 读回验证。

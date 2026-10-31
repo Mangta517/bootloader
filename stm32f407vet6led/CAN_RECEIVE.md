@@ -1,38 +1,53 @@
-# F407 通过 CAN 向 F103 发送 hyf
+# F407 更新状态机
 
-两边均为正常模式、200 kbit/s、标准数据帧，使用现有 CAN 引脚和时钟配置。
+`application/app_update.c/.h` 管理更新流程，默认状态为 `APP_UPDATE_IDLE = 0`。主循环调用 `app_update_work()`。
 
-| 工程 | CAN_RX | CAN_TX | CAN 时钟与位时序 |
-| --- | --- | --- | --- |
-| STM32F103CAN | PA11 | PA12 | 36 MHz / 36 / (1 + 2 + 2) = 200 kbit/s |
-| stm32f407vet6led | PB8 | PB9 | 42 MHz / 42 / (1 + 2 + 2) = 200 kbit/s |
+| 状态 | 当前行为 |
+| --- | --- |
+| `APP_UPDATE_IDLE` | 每 500 ms 切换 LED0/LED1，等待串口中断切换状态 |
+| `APP_UPDATE_SEND_COMMAND` | 发送一次标准 CAN ID `0`、DLC `3`、ASCII `hyf`，随后进入接收状态 |
+| `APP_UPDATE_RECEIVE` | 累计标准 ID `1` 数据帧的 DLC；连续 1 秒无有效数据后打印总字节数，回到空闲状态 |
+| `APP_UPDATE_VERIFY` | 预留，尚未实现固件校验 |
+| `APP_UPDATE_DONE` | 预留，尚未修改 EEPROM 更新状态 |
 
-## 收发流程
+仅空闲状态闪灯。上电不自动发送 CAN 命令；合法串口命令触发一次发送后开始接收统计，结束后回到空闲状态，不会进入固件校验或 EEPROM 更新流程。
 
-- F407 上电约一秒后，每秒主动发送一次标准数据帧：ID `0`、DLC `3`、数据 `68 79 66`（ASCII `hyf`）。
-- 命令不带回车、换行或字符串结束符，不填充成 8 字节；发送不依赖 F103 先发报文。
-- F407 应用层已移除接收报文打印和原样回包流程，保留 LED 闪烁。
-- F103 硬件过滤器只接收标准 ID `0` 的数据帧；`app_update_wait()` 校验长度为 3、内容为 `hyf` 后，从等待状态切换到发送状态。
-- F103 的 `app_update_send()` 当前为空函数，收到命令后尚不发送更新内容。
+## 串口命令
 
-提交 CAN 邮箱不代表 F103 已处理命令；F103 串口出现 `hyf OK, enter send update` 才表示命令校验通过。
+USART1 为 PA9/TX、PA10/RX，115200、8N1。硬件初始化后调用 `app_update_init()`，使用 `HAL_UARTEx_ReceiveToIdle_IT()` 接收整条命令。回调中用 `strcmp()` 判断 `cmd` 并切换为发送状态。主循环在空闲状态调用闪灯函数，在发送状态直接调用 `int_can_send()`。
 
-## 接线与查看
+向 F407 发送 `cmd`，以串口 IDLE 结束，可附加 CR/LF。无需附带长度，原来的 `start:长度` 和 `cmd:长度` 均不再作为启动命令。F103 装载 BIN 的串口命令仍为 `start:实际BIN长度`。
 
-每块 MCU 的 CAN_TX 接各自收发器 TXD，CAN_RX 接 RXD。两个收发器的 CANH 相连、CANL 相连，GND 共地；总线两端各接一个 120 Ω 终端电阻。MCU 的 CAN 引脚需要经过 CAN 收发器接入总线。
+`app_update_state` 可在调试器中查看。`app_update_size_bytes` 保存本轮实际接收字节数，每次发送 `hyf` 前清零，统计结束后保留到下一轮。当前不接收预期长度。固件拼接、W25Q16 写入、镜像校验和 EEPROM 标志提交暂未实现。
 
-查看 F103 命令接收结果：将 **F103 PA9/TX** 接 3.3 V USB 转 TTL 的 RXD，GND 接 GND；串口助手设为 **115200、8N1、无流控**。收到合法命令后打印：
+## 接收丢包测试
+
+先让 F103 准备好 BIN，再向 F407 串口发送 `cmd`。F407 发送一次 `hyf` 后进入接收状态，不再逐帧打印，避免阻塞串口输出影响接收速度。只累计标准 ID `1`、数据帧、DLC 为 1～8 的有效载荷字节数，短尾帧按实际 DLC 计数。
+
+F103 当前没有长度帧或结束帧，因此连续 1000 ms 未收到有效数据视为本轮结束，通过同一 USART1 打印一次总字节数，例如：
 
 ```text
-hyf OK, enter send update
+CAN receive done,len:4480
 ```
 
-F407 的 USART1 仅保留上电提示 `CAN1 TX hyf 200000 bit/s`，不再打印接收报文。F407 APP 起始地址仍为 `0x08008000`，通过原 Bootloader 启动；HEX 自带地址，原始 BIN 应烧录到 `0x08008000`。
+无关 ID、扩展帧、远程帧、零长度帧和非法 DLC 不计数，也不重置空闲计时。没有收到任何有效数据时，发送命令后等待 1 秒打印 `CAN receive done,len:0`。接收间隔如果达到 1 秒，会被当作本轮结束。
 
-## 工程与验证
+将 F407 的接收长度与 F103 的 `CAN send done,len:4480` 对照；当前测试 BIN 为 4480 字节，应收到 560 个 8 字节数据帧。少于 4480 表示本轮统计的字节不足，长度相等仅说明字节数匹配，不校验内容、顺序或重复帧。完成后 F407 回到空闲，可再次接受 `cmd`；F103 完成后停留在 DONE，开始下一轮前需复位 F103。
 
-- F103：`D:/3251/stm32f407vet6/STM32F103CAN/MDK-ARM/STM32F103CAN.uvprojx`。
-- F407：`D:/3251/stm32f407vet6/stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx`。
-- F407 主机回归：在 F407 工程目录运行 `python tools/test_can_receive.py`，检查发送 ID、三字节命令、1000 ms 间隔、毫秒计数回绕、应用无串口输出，以及 CAN 接口的接收和初始化错误处理。
-- F103 主机回归：在 F103 工程目录运行 `python tools/test_app_update.py`，检查 `hyf` 命令校验和状态切换。
-- 本次两套主机回归通过；F407 Keil 编译 0 错误、0 警告，日志为 `MDK-ARM/can_hyf_build_20261030.log`。尚未烧录或验证实板收发。
+## CAN 接口与接线
+
+`int_can_init()` 配置全接收过滤器并启动 CAN1；`int_can_send()` 保留标准帧发送功能；`int_can_receive_msg()` 保留 FIFO0 单帧读取功能，更新状态机在接收状态中连续轮询，只在本轮结束后通过 USART1 打印累计长度。
+
+F407 CAN1 使用 PB8/RX、PB9/TX，正常模式、200 kbit/s：42 MHz / 42 / (1 + 2 + 2)。各 MCU 通过 CAN 收发器接入 CANH/CANL，共地，总线两端各接一个 120 Ω 终端电阻。
+
+发送函数沿用现有 CAN 邮箱接口，当前状态切换只表示已调用发送函数，不代表对端已接收、固件已写入或更新完成。
+
+F407 APP 起始地址为 `0x08008000`，通过原 Bootloader 启动；原始 BIN 应烧录到 `0x08008000`。
+
+## 验证
+
+运行 `python tools/test_can_receive.py`，覆盖串口命令解析、IDLE/CRLF 结束、非法命令、UART 错误、空闲闪灯、每轮单次 hyf、DLC 累计与短尾帧、无关帧过滤、1 秒空闲结束、零字节报告、多轮清零、tick 回绕、4480 字节接收统计、预留状态及 CAN FIFO/初始化错误处理。
+
+Keil 工程：`MDK-ARM/stm32f407vet6led.uvprojx`。主机回归及编译不代表实板串口与 CAN 已验证。
+
+当前长度统计版本已收到用户实板串口反馈：发送 `cmd` 后打印 `CAN receive done,len:4480`，与当前联调 BIN 长度一致。本轮按字节数统计未发现缺失；没有进行数据内容、顺序或重复帧校验。W25Q16 接收保存、CAN 接收中断和 1 KiB 数据缓冲仍未实现，缓冲容量讨论不属于本次代码改动。
