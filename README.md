@@ -176,6 +176,15 @@ python -B .\stm32f407vet6reset\tools\test_uart_ring.py
 
 ## 更新记录
 
+### 2026-10-31 · [68a7f9d](https://github.com/Mangta517/bootloader/commit/68a7f9d76124c630d224de5bbaf29fb7fd494a31) · F103 串口接收与 F407 CAN 配套
+
+- **问题**：F103 串口接收/Flash 和 F407 CAN 命令工程仅保存在本地，F103 被原发布白名单忽略，缺少配套版本。
+- **改动**：纳入 F103 源码、HAL/CMSIS、CubeMX/Keil 配置、串口/CAN 接口、三个主机测试和操作说明；同步 F407 LED APP 的 CAN/USART 配置、`hyf` 命令及回归；调整忽略规则并保留厂商许可证。源码保留当前本地状态，未擅自取消 F103 主函数中的注释。
+- **优化作用**：将 `start:长度`、Flash 分区、原串口反馈和 F407/F103 CAN 命令保存在同一仓库版本；编译结果、备份、生成图片和调试缓存不纳入源码。
+- **验证结果**：四工程 Keil 全量重建均为 0 错误、0 警告。主引导三套、恢复程序三套、F407 CAN 一套及 F103 的 DMA、接收/Flash 联合两套回归通过，共 9 套；F103 `test_app_update.py` 启动顺序回归失败，原因是 `main.c` 中接收循环和更新初始化被注释。本条文档提交引用上述功能提交的检查结果，没有额外重复构建。
+- **剩余问题**：当前 F103 接收启动入口未启用；`app_update_send()` 仍为空，尚不能经 CAN 发送 BIN；F407 邮箱等待及未检查发送结果沿用当前实现。未烧录或进行实板验证；原有其余限制保留。
+
+
 ### 2026-10-27 · [430dadb](https://github.com/Mangta517/bootloader/commit/430dadbbfdbfa0a3d6f865c4147dae49b106cc4c) · 三工程首次纳管
 
 - **问题**：主引导、串口恢复和示例 APP 分散在本地，缺少能够一起构建、联调和追溯的源码基线及使用说明。
