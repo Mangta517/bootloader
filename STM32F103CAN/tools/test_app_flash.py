@@ -169,7 +169,7 @@ static void begin(uint32_t expected)
     serial_output[0] = 0;
     reset_calls = 0;
     App_bootloader_init();
-    assert(strcmp(serial_output, "reset start\r\nwait user send \nsend 'start:len'to start\n") == 0);
+    assert(strcmp(serial_output, "Waiting BIN: start:len\r\n") == 0);
     assert(app_flash_state == APP_FLASH_WAIT && app_size_bytes == 0);
     if (expected != 0)
     {
@@ -239,7 +239,7 @@ int main(void)
     tick++;
     poll(1);
     assert(app_flash_state == APP_FLASH_DONE && program_calls == 2 && app_size_bytes == 3 && stop_calls == 1);
-    assert(strstr(serial_output, "Length=3\r\nFlash erased; send data\r\nok,len:3\n") != NULL);
+    assert(strstr(serial_output, "Flash erased; send data\r\nok,len:3\n") != NULL);
     check_data(3);
     assert(flash_memory[32771] == 0xFF && flash_memory[33792] == 0xA5);
     feed(10, 0);
@@ -287,6 +287,17 @@ int main(void)
     poll(1);
     assert(app_flash_state == APP_FLASH_DONE && locked == 1);
     check_data(APP_FLASH_CAPACITY_BYTES);
+
+    /* 单 LED 更新测试包跨过 DMA 半区和 Flash 页边界，按实际 4480 字节完成。 */
+    begin(4480);
+    feed(UART1_RX_DMA_HALF_SIZE, 0);
+    poll(20);
+    feed(4480 - UART1_RX_DMA_HALF_SIZE, 0);
+    tail();
+    tick += APP_FLASH_FINISH_DELAY_MS;
+    poll(1);
+    assert(app_flash_state == APP_FLASH_DONE && app_size_bytes == 4480 && erase_calls == 5);
+    check_data(4480);
 
     begin(4);
     feed(3, 0);
@@ -367,7 +378,7 @@ int main(void)
     assert(app_flash_state == APP_FLASH_DONE);
     check_data(3);
     puts("PASS: start:length parsing, pre-erase before DMA, 2-second idle and exact length comparison,");
-    puts("      original UART feedback/reset behavior, binary stream, odd tails, full 32 KiB and tick wrap");
+    puts("      concise UART feedback/reset behavior, binary stream, odd tails, full 32 KiB and tick wrap");
     return 0;
 }
 '''

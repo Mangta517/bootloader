@@ -1,6 +1,6 @@
 # F103 串口接收并写入内部 Flash
 
-`Core/Src/main.c` 当前直接发送 Flash 中已有的 4480 字节 BIN，串口接收循环暂未接入启动流程。下面说明保留的串口接收功能；重新装载 BIN 前，需按 `CAN_README.md` 恢复接收入口。
+`Core/Src/main.c` 当前直接使用 Flash 中已有的 4480 字节 BIN，复位后等待 CAN 更新命令。下面说明保留的串口接收功能；需要重新装载 BIN 时，先恢复串口接收入口。
 
 ## 分区
 
@@ -12,8 +12,8 @@
 
 USART1：PA9/TX、PA10/RX，3.3 V TTL，共地，115200、8N1。
 
-1. 文本发送 `start:实际BIN字节数`，例如 `start:4484`，可附加 CR/LF；沿用原工程的串口 IDLE 命令结束方式。
-启动提示沿用原文：`reset start`、`wait user send `、`send 'start:len'to start`；成功反馈沿用 `ok,len:长度`，保留原有 CR/LF 格式。
+1. 文本发送 `start:实际BIN字节数`，例如单 LED 测试 BIN 使用 `start:4480`，可附加 CR/LF；沿用原工程的串口 IDLE 命令结束方式。
+启动只提示 `Waiting BIN: start:len`，擦除完成后提示 `Flash erased; send data`；成功反馈沿用 `ok,len:长度`，保留原有 CR/LF 格式。不再打印无效命令、无效长度和重复的声明长度，解析与校验逻辑保留。
 
 2. 声明长度必须为 1～32768 字节。应用按长度提前擦除目标 Flash 页，随后启动循环 DMA。
 3. 等待串口返回 `Flash erased; send data`，再单独发送原始二进制 BIN 文件。命令和 BIN 不要连发。
@@ -33,7 +33,7 @@ Flash 使用 F103 的 1 KiB 页擦除和 16 位半字写入。有效长度不包
 - `app_size_bytes`：已接受的 BIN 字节数，DONE 时为有效写入长度；接收中的最后一个奇数字节可能仍在 RAM。
 - `uart1_rx_full_len`：DMA 接收的 BIN 总字节数，不包含命令。
 
-恢复串口接收入口时，先调用 `App_bootloader_init()`，再在独立 while 循环中持续调用 `App_bootloader_update()`，接收完成后才调用 `app_update_init()`。当前联调入口直接使用已有 BIN，不执行上述接收循环。
+恢复串口接收入口时，先调用 `App_bootloader_init()`，再在独立 while 循环中持续调用 `App_bootloader_update()`，接收完成后才调用 `app_update_init()`。当前启动入口不执行上述接收循环，也不擦除 BIN 数据区。
 原 `interface/int_uart.c` 的循环 DMA 接收处理逻辑未改动。USART1 的 `fputc()` 负责协议反馈与现有 printf 日志。
 
 ## 验证

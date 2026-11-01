@@ -17,13 +17,13 @@ static uint8_t App_bootloader_check_meta(void)
     {
         return 1;
     }
-     w25_app_start_addr = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
-     app_size_bytes = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    w25_app_start_addr = (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    app_size_bytes = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
 
-    // 起点在首扇区内并避开元数据；长度为 (0x0800, 0x78000]，整段 APP 不能超出 W25Q16。
-    if ((w25_app_start_addr < 8) || (w25_app_start_addr >= 0x1000) ||
+    // BIN 从第 1 个扇区起存放；长度为 (0x0800, 0x78000]，整段 APP 不能超出 W25Q16。
+    if ((w25_app_start_addr < APP_W25_START_ADDR_MIN) || (w25_app_start_addr >= W25Q16_SIZE_BYTES) ||
         (app_size_bytes <= 0x0800) || (app_size_bytes > 0x78000) ||
-        (app_size_bytes > 0x200000 - w25_app_start_addr))
+        (app_size_bytes > W25Q16_SIZE_BYTES - w25_app_start_addr))
     {
         printf("APP metadata error: W25=0x%08lX length=%lu\r\n",
                (unsigned long)w25_app_start_addr, (unsigned long)app_size_bytes);

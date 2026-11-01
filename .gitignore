@@ -5,6 +5,7 @@
 !/stm32f407vet6/
 !/stm32f407vet6reset/
 !/stm32f407vet6led/
+!/stm32f407vet6led_blink/
 !/STM32F103CAN/
 
 # Historical copies and local editor state.
@@ -27,6 +28,7 @@ __pycache__/
 **/MDK-ARM/stm32f407vet6/
 **/MDK-ARM/stm32f407vet6reset/
 **/MDK-ARM/stm32f407vet6led/
+**/MDK-ARM/stm32f407vet6led_blink/
 **/MDK-ARM/STM32F103CAN/
 **/MDK-ARM/DebugConfig/
 **/MDK-ARM/RTE/

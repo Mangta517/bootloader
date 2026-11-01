@@ -378,26 +378,29 @@ int main(void)
     uint32_t key_mode;
 
     assert(flash == (void *)(uintptr_t)0x08000000);
-    // 起点限于首扇区且避开元数据；文件长度为 (0x0800, 0x78000]，允许跨扇区存放。
-    expect_w25_check(0x100, 0x1000, 0x20001000, APP_START_ADDR + 0x101, 0);
-    expect_w25_check(0xFFF, 0x801, 0x20001000, APP_START_ADDR + 0x101, 0);
-    expect_w25_check(8, 0x801, 0x20001000, APP_START_ADDR + 9, 0);
-    expect_w25_check(0x100, 0x802, 0x20001000, APP_START_ADDR + 0x801, 0);
-    expect_w25_check(0x100, 0x78000, 0x20001000, app_addr_end - 1, 0);
-    expect_w25_check(0x100, 0x1001, 0x20001000, APP_START_ADDR + 0xFFF, 0);
+    // 第 0 扇区只存元数据，BIN 起点从 0x1000 起，覆盖后续扇区和芯片末端。
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, 0x20001000, APP_START_ADDR + 0x101, 0);
+    expect_w25_check(0x1001, 0x801, 0x20001000, APP_START_ADDR + 0x101, 0);
+    expect_w25_check(0x1000, 0x801, 0x20001000, APP_START_ADDR + 9, 0);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x802, 0x20001000, APP_START_ADDR + 0x801, 0);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x78000, 0x20001000, app_addr_end - 1, 0);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1001, 0x20001000, APP_START_ADDR + 0xFFF, 0);
+    expect_w25_check(0x2000, 0x1000, 0x20001000, APP_START_ADDR + 0x101, 0);
+    expect_w25_check(0x12ABCD, 0x1000, 0x20001000, APP_START_ADDR + 0x101, 0);
+    expect_w25_check(W25Q16_SIZE_BYTES - 0x801, 0x801, 0x20001000, APP_START_ADDR + 0x101, 0);
     // W25 APP 预检只判断向量地址范围，不限制栈对齐或复位入口的 Thumb 位。
-    expect_w25_check(0x100, 0x1000, 0x20001004, APP_START_ADDR + 0x101, 0);
-    expect_w25_check(0x100, 0x1000, 0x20001000, APP_START_ADDR + 0x100, 0);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, 0x20001004, APP_START_ADDR + 0x101, 0);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, 0x20001000, APP_START_ADDR + 0x100, 0);
     for (index = 0; index < sizeof(stack_tops) / sizeof(stack_tops[0]); index++)
     {
-        expect_w25_check(0x100, 0x1000, stack_tops[index], APP_START_ADDR + 0x101, 0);
+        expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, stack_tops[index], APP_START_ADDR + 0x101, 0);
     }
     const uint32_t bad_meta[][2] =
     {
-        {0, 0x1000}, {7, 0x1000}, {0x1000, 0x1000}, {0x12ABCD, 0x1000},
+        {0, 0x1000}, {7, 0x1000}, {8, 0x1000}, {0x100, 0x1000}, {0xFFF, 0x1000},
         {W25Q16_SIZE_BYTES, 0x1000}, {UINT32_MAX, UINT32_MAX},
-        {8, 0}, {8, 7}, {8, 0x7FF}, {8, 0x800}, {8, 0x78001},
-        {W25Q16_SIZE_BYTES - 0x400, 0x401}, {W25Q16_SIZE_BYTES - 4, 8}, {0x100, UINT32_MAX}
+        {0x1000, 0}, {0x1000, 7}, {0x1000, 0x7FF}, {0x1000, 0x800}, {0x1000, 0x78001},
+        {W25Q16_SIZE_BYTES - 0x801, 0x802}, {W25Q16_SIZE_BYTES - 4, 0x801}, {0x1000, UINT32_MAX}
     };
     for (index = 0; index < sizeof(bad_meta) / sizeof(bad_meta[0]); index++)
     {
@@ -406,7 +409,7 @@ int main(void)
     }
     for (index = 0; index < sizeof(bad_stacks) / sizeof(bad_stacks[0]); index++)
     {
-        expect_w25_check(0x100, 0x1000, bad_stacks[index], APP_START_ADDR + 0x101, 1);
+        expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, bad_stacks[index], APP_START_ADDR + 0x101, 1);
         assert(w25_read_calls == 2);
     }
     const uint32_t bad_handlers[] =
@@ -416,10 +419,10 @@ int main(void)
     };
     for (index = 0; index < sizeof(bad_handlers) / sizeof(bad_handlers[0]); index++)
     {
-        expect_w25_check(0x100, 0x1000, 0x20001000, bad_handlers[index], 1);
+        expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, 0x20001000, bad_handlers[index], 1);
         assert(w25_read_calls == 2);
     }
-    expect_w25_check(0x100, 0x1001, 0x20001000, APP_START_ADDR + 0x1001, 1);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1001, 0x20001000, APP_START_ADDR + 0x1001, 1);
 
     // 每个 APP 扇区末端及跨界一字节：只擦到包含 BIN 最后一个字节的扇区。
     const uint32_t erase_cases[][2] =
@@ -433,9 +436,9 @@ int main(void)
     };
     for (index = 0; index < sizeof(erase_cases) / sizeof(erase_cases[0]); index++)
     {
-        const uint32_t starts[] = {8, 0x100, 0xFFF};
-        uint32_t image_start = starts[index % 3];
         uint32_t length = erase_cases[index][0];
+        const uint32_t starts[] = {0x1000, 0x1001, 0x1FFF, W25Q16_SIZE_BYTES - length};
+        uint32_t image_start = starts[index % (sizeof(starts) / sizeof(starts[0]))];
         uint32_t erase_end = flash_sector_ends[erase_cases[index][1] - 1];
 
         prepare_w25_copy(image_start, length);
@@ -481,7 +484,7 @@ int main(void)
         assert(bootloader_check_update_status == BOOT_RESET && eeprom_write_calls == 0 && flash_program_calls == 0);
         assert(flash_unlock_calls == 0 && flash_erase_calls == 0 && flash_lock_calls == 0);
     }
-    expect_w25_check(0x100, 0x1000, 0, APP_START_ADDR + 0x101, 1);
+    expect_w25_check(APP_W25_START_ADDR_MIN, 0x1000, 0, APP_START_ADDR + 0x101, 1);
     w25_read_calls = 0;
     bootloader_check_update_status = BOOT_UPDATE;
     App_bootloader_update();
@@ -506,7 +509,7 @@ int main(void)
     // 擦除、写入中途或上锁失败，不清升级标记，也不进入未完成的 APP。
     for (index = 0; index < 5; index++)
     {
-        prepare_w25_copy(0xFFF, 0xA01);
+        prepare_w25_copy(0x1FFF, 0xA01);
         if (index == 0)
         {
             flash_unlock_status = HAL_BUSY;
@@ -541,7 +544,7 @@ int main(void)
         uint32_t expected_program_calls = 0;
 
         reset_hardware();
-        prepare_w25_copy(8, 0xA01);
+        prepare_w25_copy(APP_W25_START_ADDR_MIN, 0xA01);
         w25_read_fail_call = index;
         App_bootloader_update();
         assert(w25_read_calls == index && bootloader_check_update_status == BOOT_RESET);
@@ -566,12 +569,12 @@ int main(void)
         assert(entered_handler == RESET_START_ADDR + 0x101 && SCB->VTOR == RESET_START_ADDR);
     }
     reset_hardware();
-    prepare_w25_copy(8, 0xA01);
+    prepare_w25_copy(APP_W25_START_ADDR_MIN, 0xA01);
     key_during_program = 1;
     App_bootloader_update();
     assert(bootloader_check_update_status == BOOT_RESET && disabled == 0);
     assert(eeprom_status == BOOT_NO_UPDATE && eeprom_write_calls == 1);
-    assert(memcmp((void *)(uintptr_t)APP_START_ADDR, w25_data + 8, 0xA01) == 0);
+    assert(memcmp((void *)(uintptr_t)APP_START_ADDR, w25_data + APP_W25_START_ADDR_MIN, 0xA01) == 0);
     w25_read_calls = 0;
     bootloader_check_update_status = BOOT_NO_UPDATE;
     App_bootloader_update();

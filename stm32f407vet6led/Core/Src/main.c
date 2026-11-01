@@ -20,6 +20,7 @@
 #include "main.h"
 #include "can.h"
 #include "crc.h"
+#include "i2c.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -76,7 +77,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-    uint8_t startup_message[] = "CAN1 ready 200000 bit/s\r\n";
+    uint8_t startup_message[] = "Waiting update command: cmd\r\n";
 
   __disable_irq();
   //重定向中断向量表
@@ -107,6 +108,7 @@ int main(void)
   MX_CAN1_Init();
   MX_SPI1_Init();
   MX_CRC_Init();
+    MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
     int_can_init();
     HAL_UART_Transmit(&huart1, startup_message, sizeof(startup_message) - 1, 100);

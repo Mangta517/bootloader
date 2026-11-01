@@ -22,6 +22,9 @@
 #define APP_META_PAGE       0x00  /* 扇区内第 0 个 256 字节页 */
 #define APP_META_BYTE_ADDR  0x00  /* 页内第 0 字节 */
 
+/* W25Q16 第 0 个 4 KiB 扇区保留给元数据，BIN 起点不得早于第 1 个扇区。 */
+#define APP_W25_START_ADDR_MIN 0x001000
+
 /* 定义于 app_bootloader.c，依次接收 8 字节元数据和 8 字节 APP 向量。 */
 extern uint8_t data[8];
 

@@ -19,6 +19,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
+#include "crc.h"
+#include "dma.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -89,8 +91,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_CAN_Init();
   MX_USART1_UART_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
 
     /* 使用 Flash 中已有的 BIN，复位后直接等待 CAN 命令，不重新接收或擦除数据。 */

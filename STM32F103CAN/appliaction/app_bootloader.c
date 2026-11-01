@@ -28,9 +28,7 @@ void App_bootloader_init(void)
     flash_write_offset = 0;
     last_byte = 0;
     last_byte_pending = 0;
-    printf("reset start\r\n");
-    printf("wait user send \n");
-    printf("send 'start:len'to start\n");
+    printf("Waiting BIN: start:len\r\n");
 }
 
 /* 沿用 F407 的 start:十进制长度协议，命令和 BIN 分开发送。 */
@@ -64,7 +62,6 @@ static void App_bootloader_wait_start(void)
 
     if (command_overflow != 0)
     {
-        printf("Bad command\r\n");
         command_overflow = 0;
         command_length = 0;
         return;
@@ -78,17 +75,14 @@ static void App_bootloader_wait_start(void)
     start_str = strstr((char *)command_buffer, "start:");
     if (start_str == NULL)
     {
-        printf("Bad command\r\n");
         return;
     }
     app_length = strtoul(start_str + 6, NULL, 10);
     if ((start_str[6] < '0') || (start_str[6] > '9') || (app_length == 0) || (app_length > APP_FLASH_CAPACITY_BYTES))
     {
-        printf("Bad length\r\n");
         return;
     }
     uart1_rx_app_len = (uint32_t)app_length;
-    printf("Length=%lu\r\n", (unsigned long)uart1_rx_app_len);
 
     /* 接收前按声明长度擦除所有目标页，避免一边收 BIN 一边擦除。 */
     if (HAL_FLASH_Unlock() != HAL_OK)
