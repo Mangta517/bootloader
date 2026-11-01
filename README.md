@@ -1,6 +1,6 @@
 # STM32F407 Bootloader
 
-基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 通过串口 `cmd` 触发 CAN 更新命令，并在接收结束后打印累计字节数。配套 F103 当前使用内部 Flash 中已有的 4480 字节 BIN，收到 `hyf` 后分帧发送；串口接收和内部 Flash 写入功能仍保留，当前未接入启动流程。
+基于 STM32F407VET6、STM32 HAL 和 Keil MDK 的三工程启动与升级示例：主 Bootloader 根据 EEPROM 状态启动 APP、从 W25Q16 搬运固件，或进入独立的串口恢复程序；LED APP 通过串口 `cmd` 触发 CAN 更新命令，将数据存入 5 KiB RAM 缓冲区并比较 CRC，校验通过后打印消息。配套 F103 当前原样发送内部 Flash 中已有的 4480 字节文件，不自动添加 CRC 包头；新接收协议要求预先准备带包头的文件并同步发送总长度。F103 串口接收和内部 Flash 写入功能仍保留，当前未接入启动流程。
 
 初始三工程源码基线：[430dadb](https://github.com/Mangta517/bootloader/commit/430dadbbfdbfa0a3d6f865c4147dae49b106cc4c)（2026-10-27）。后续改动、验证结果和剩余问题见[更新记录](#更新记录)。
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | [`stm32f407vet6`](stm32f407vet6) | 主 Bootloader：读取 EEPROM 状态、等待 KEY1 请求、执行 W25Q16 更新并选择跳转目标 | [`stm32f407vet6.uvprojx`](stm32f407vet6/MDK-ARM/stm32f407vet6.uvprojx) |
 | [`stm32f407vet6reset`](stm32f407vet6reset) | 独立恢复程序：USART1 接收 BIN、写入 APP 区并跳转 | [`stm32f407vet6reset.uvprojx`](stm32f407vet6reset/MDK-ARM/stm32f407vet6reset.uvprojx) |
-| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：空闲闪灯；串口 `cmd` 触发一次 `hyf`，随后累计 CAN 接收长度 | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
+| [`stm32f407vet6led`](stm32f407vet6led) | 示例 APP：空闲闪灯；串口 `cmd` 触发一次 `hyf`，随后接收到 5 KiB 缓冲区并校验 CRC | [`stm32f407vet6led.uvprojx`](stm32f407vet6led/MDK-ARM/stm32f407vet6led.uvprojx) |
 | [`STM32F103CAN`](STM32F103CAN) | 配套发送端：收到 `hyf` 后，将 Flash 中已有的 BIN 以标准 ID 1 分帧发送 | [`STM32F103CAN.uvprojx`](STM32F103CAN/MDK-ARM/STM32F103CAN.uvprojx) |
 
 四个目录保留各自的 `Core`、`Drivers`、CubeMX `.ioc` 和 Keil 配置；主引导、恢复和配套 CAN 工程还包含 `application`、`interface` 和主机测试。仓库不纳入旁边的 CMake 工程、历史备份、动画实验、编译产物和本机调试设置。厂商依赖保留原有许可证文件。
@@ -106,9 +106,13 @@ CAN 双方均为 200 kbit/s：F407 PB8/RX、PB9/TX；F103 PA11/RX、PA12/TX，�
 
 F407 在 USART1 收到 `cmd` 后发送一次标准 ID 0、DLC 3 的 `hyf`，随后进入接收状态。F103 严格校验命令和 Flash 状态后，以标准 ID 1 发送有效 BIN，单帧最多 8 字节，尾帧只发送剩余字节；每帧发送成功后等待 10 ms，发送完成后停留 DONE，失败或超时则进入 ERROR 并停止。
 
-F407 只累计标准 ID 1、DLC 为 1～8 的数据帧，接收期间不逐帧打印。连续 1 秒无有效数据后输出一次 `CAN receive done,len:实际接收字节数`，再回到空闲；完全没有收到数据也会报告 0。开始下一轮前复位 F103，再向空闲的 F407 发送 `cmd`。
+F407 的无参函数 `app_update_receive(void)` 调用底层 CAN 接收接口，使用全局 `can_rx_msg` 保存帧头、数据和 FIFO0 读取前的报文数量 `count`。标准 ID 1、DLC 为 1～8 的数据帧按实际长度追加到 `can_rx_buffer[5120]`，由 `can_rx_len` 累计总字节数；接收期间不逐帧打印，连续 1 秒无有效数据后进入 CRC 校验。
 
-当前 CAN 路径只做接收长度统计，不进行数据内容校验、W25Q16 保存或 EEPROM 更新。CAN 接收中断和 1 KiB 数据缓冲尚未实现，相关容量与连续擦写时序讨论不属于当前代码功能。
+接收格式为 `[4 字节小端 CRC][有效载荷]`，总长度包含包头，有效载荷最大 5116 字节。CRC 仅覆盖有效载荷，采用 `app_crc_cal()` 的 STM32 硬件 CRC，末尾不足 4 字节时补 0。校验通过后打印一次 `CRC校验通过\r\n`，保留缓冲区和长度并停留 DONE；CRC 不匹配或总长度不超过 4 字节时，清空整个缓冲区和长度后回到空闲，可再次接收 `cmd`。完全没有有效数据或缓冲区溢出进入 ERROR；DONE 和 ERROR 后需复位 F407，F103 重发前也需复位并准备好数据。
+
+F103 尚未自动生成包头，旧的原始 BIN 不能直接用于新校验协议。例如 4480 字节有效载荷需装载 4484 字节的带 CRC 文件，并将 F103 的 `APP_UPDATE_STORED_SIZE_BYTES` 同步为 4484。CRC 算法、补零和字节顺序见 [F407 接收说明](stm32f407vet6led/CAN_RECEIVE.md#crc-包头与比较)；带包头文件用于 CAN 传输，直接烧录 APP 时仍使用原始 BIN。
+
+当前 CAN 路径轮询接收到 RAM 并校验，保留 SPI1/W25Q16 底层驱动和 CRC 外设配置，应用不调用 W25Q16 擦除、写入，也不更新 EEPROM。
 
 - [F103 串口操作、Flash 分区与验证](STM32F103CAN/FLASH_RECEIVE.md)
 - [F103 CAN 状态机与功能接口](STM32F103CAN/CAN_README.md)
@@ -148,13 +152,14 @@ python -B .\stm32f407vet6\tools\test_bootloader_jump.py
 python -B .\stm32f407vet6reset\tools\test_eeprom.py
 python -B .\stm32f407vet6reset\tools\test_w25q16.py
 python -B .\stm32f407vet6reset\tools\test_uart_ring.py
-python -B .\stm32f407vet6led\tools\test_can_receive.py
 python -B .\STM32F103CAN\tools\test_uart_receive.py
 python -B .\STM32F103CAN\tools\test_app_flash.py
 python -B .\STM32F103CAN\tools\test_app_update.py
 ```
 
 这些测试以模拟 HAL 和内存运行实际 C 代码；部分用例使用 Windows 内存映射接口，不能假设在 Linux / macOS 上直接可运行。
+
+2026-11-01 的 5 KiB 接收与 CRC 版本已按要求删除 LED APP 的 CAN 接收测试脚本。发布前在独立工作区全量重建该 APP，0 错误、0 警告；Code=10958、RO-data=458、RW-data=40、ZI-data=7024，ROM 合计 11456 字节。本次发布未重跑主机回归或其余三个未改动工程的构建，未烧录或执行实板验证。此前长度统计版本的实板反馈不作为新 CRC 协议的通过证据。
 
 2026-10-27 对源码基线 `430dadb` 的验证：
 
@@ -177,15 +182,23 @@ python -B .\STM32F103CAN\tools\test_app_update.py
 
 ## 当前限制
 
-- 两条升级路径均未提供 CRC、镜像签名或完整写后读回比对，长度和向量检查不能证明固件内容完整、一致或可信。
+- 主引导 W25Q16 搬运与串口恢复路径均未提供 CRC、镜像签名或完整写后读回比对，长度和向量检查不能证明固件内容完整、一致或可信；LED APP 的 CAN CRC 目前仅校验 RAM 中的接收数据。
 - EEPROM 接口不返回通信结果；升级标志没有掉电事务保护，读取异常、写入失败和中途掉电的板级恢复行为仍待验证。
 - 主引导跳转失败后停留空主循环；持久 `BOOT_RESET` 状态不会由恢复程序自动清除，后续复位仍会进入恢复流程。
 - W25Q16 更新和串口恢复直接擦写同一 APP 区，没有 A/B APP 回滚；恢复区需要事先正确部署。
 - LED APP 的 BIN 生成命令包含本机工具路径，换机需要调整；实际硬件接线与本页一致性仍需自行核对。
-- CAN 接收目前只累计字节数，长度一致不能证明内容、顺序或重复帧正确；没有结束帧，连续 1 秒无有效数据会结束本轮。尚未实现 CAN 接收中断、1 KiB 数据缓冲、W25Q16 保存和 EEPROM 更新。
-- F103 当前使用固定 4480 字节的已有 BIN 联调入口，新板或已擦除数据区不能直接套用；需先装载有效 BIN 并同步长度。F103 发送完成或失败后，开始下一轮前需要复位。
+- CAN 接收采用 5 KiB RAM 缓冲和 CRC 校验，没有结束帧，连续 1 秒无有效数据会结束本轮；尚未实现 CAN 接收中断、W25Q16 保存和 EEPROM 更新。CRC 通过后或接收错误后仍需复位 F407，校验失败则自动清空数据并回到空闲。
+- F103 当前使用固定 4480 字节的已有文件联调入口，不自动添加 CRC 包头；需先装载与 F407 CRC 算法一致的带包头文件并同步总长度。新板或已擦除数据区不能直接套用；F103 发送完成或失败后，开始下一轮前需要复位。
 
 ## 更新记录
+
+### 2026-11-01 · [26457ef](https://github.com/Mangta517/bootloader/commit/26457efffa3610ad1e5ac0c9079e1e2ed62aa1e2) · F407 5 KiB CAN 接收与 CRC 校验
+
+- **问题**：旧版只累计 CAN 字节数，未保存整轮数据或比较发送端 CRC；接收结构体和 FIFO 数量为局部变量，不便后续处理和调试。
+- **改动**：`application/app_update.c/.h` 使用 5120 字节全局缓冲区和 `can_rx_len`，无参接收函数调用 CAN 接口逐字节追加有效数据；`interface/int_can.h` 将 `count` 加入全局接收结构体。连续 1 秒无有效数据后比较 4 字节小端包头与有效载荷的硬件 CRC，通过打印一次并保留数据，校验失败清空缓冲区和长度后返回空闲。同步 CRC/SPI 初始化、HAL 依赖、CubeMX/Keil 配置及 `CAN_RECEIVE.md`，按要求删除接收测试脚本，保留 W25Q16 底层驱动且应用不执行擦写。
+- **优化作用**：在 RAM 中保存整轮接收内容，按实际 DLC 处理短尾帧并检查容量；使用清晰的逐字节循环，避免非必要 `memcpy`；CRC 包头不参与载荷校验，校验失败可重新开始。
+- **验证结果**：发布前在独立工作区对该功能提交全量重建 F407 APP，ARMCC 5.06 update 5 输出 0 错误、0 警告；Code=10958、RO-data=458、RW-data=40、ZI-data=7024。提交差异检查通过，保留厂商及 CubeMX 文件原有的末尾空行。本次发布未重跑主机回归及其他工程构建，未烧录或执行实板验证；本条配套文档提交复用上述构建结果。
+- **剩余问题**：F103 不自动生成 CRC 包头，需要预置带包头文件并同步总长度；5 KiB 包含 4 字节包头，最大载荷 5116 字节。接收仍依赖轮询和空闲超时，未保存到 W25Q16 或提交 EEPROM，成功或接收错误后仍需复位。
 
 ### 2026-11-01 · [957ea1f](https://github.com/Mangta517/bootloader/commit/957ea1fbb9615138a5fd2659dd68efa763e85647) · F103 BIN 分帧发送与 F407 接收长度测试
 
