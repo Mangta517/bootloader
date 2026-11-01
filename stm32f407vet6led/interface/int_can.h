@@ -8,6 +8,7 @@ typedef struct
 {
     CAN_RxHeaderTypeDef RxHeader;
     uint8_t data[8];
+    uint8_t count;    /* 本次读取前 FIFO0 的报文数量，0 表示无数据或读取失败。 */
 } CAN_MSG_RECEIVE;
 // 配置全接收过滤器并启动 CAN1。
 void int_can_init(void);

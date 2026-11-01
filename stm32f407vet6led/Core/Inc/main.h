@@ -61,8 +61,22 @@ void Error_Handler(void);
 #define led0_GPIO_Port GPIOE
 #define led1_Pin GPIO_PIN_6
 #define led1_GPIO_Port GPIOE
+#define F_CS_Pin GPIO_PIN_0
+#define F_CS_GPIO_Port GPIOB
+#define W25Q16_SCL_Pin GPIO_PIN_3
+#define W25Q16_SCL_GPIO_Port GPIOB
+#define W25Q16_MISO_Pin GPIO_PIN_4
+#define W25Q16_MISO_GPIO_Port GPIOB
+#define W25Q16_MOSI_Pin GPIO_PIN_5
+#define W25Q16_MOSI_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
+
+#define F_CS_Pin GPIO_PIN_0
+#define F_CS_GPIO_Port GPIOB
+#define W25Q16_SCL_Pin GPIO_PIN_3
+#define W25Q16_MISO_Pin GPIO_PIN_4
+#define W25Q16_MOSI_Pin GPIO_PIN_5
 
 /* USER CODE END Private defines */
 

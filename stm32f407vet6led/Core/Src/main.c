@@ -19,6 +19,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
+#include "crc.h"
+#include "spi.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -103,6 +105,8 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   MX_CAN1_Init();
+  MX_SPI1_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
     int_can_init();
     HAL_UART_Transmit(&huart1, startup_message, sizeof(startup_message) - 1, 100);
